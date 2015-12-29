@@ -1,3 +1,14 @@
+'''nonlinearity
+file creates classes for common neural network
+nonlinearities. All classes have 2 static methods:
+
+    f(x numpy.ndarray) -> numpy.ndarray
+        evaluate the nonlinearity on a numpy array
+
+    df(y numpy.ndarray) -> numpy.ndarray
+        evaluate the nonlinearity on a numpy array
+        _FROM THE OUTPUT_ of f(x)
+'''
 import numpy as np
 from scipy.misc import logsumexp
 from math import tanh, exp
@@ -31,10 +42,10 @@ class Tanh():
         d/dx tanh(x) = 1 - tanh^2(x)
 
         >>> import numpy
-        >>> Tanh.df(np.array([-999, 0, 999]))
+        >>> Tanh.df(Tanh.f(np.array([-999, 0, 999])))
         array([ 0.,  1.,  0.])
         '''
-        return 1 - np.square(np.tanh(x))
+        return 1 - np.square(x)
 
 class Sigmoid():
     '''Sigmoid
@@ -63,11 +74,10 @@ class Sigmoid():
 
         >>> import numpy
         >>> _ = numpy.seterr(over='ignore', under='ignore')
-        >>> Sigmoid.df(np.array([-999, 0, 999]))
+        >>> Sigmoid.df(Sigmoid.f(np.array([-999, 0, 999])))
         array([ 0.  ,  0.25,  0.  ])
         '''
-        f = np.reciprocal(1 + np.exp(-1*x))
-        return f * (1 - f)
+        return x * (1 - x)
 
 class ReLu():
     '''ReLu
@@ -96,7 +106,7 @@ class ReLu():
         at x
 
         >>> import numpy
-        >>> ReLu.df(numpy.array([-10, -1, 1, 10])) + 0 # add 0 to case from bool to int
+        >>> ReLu.df(ReLu.f(numpy.array([-10, -1, 1, 10]))) + 0 # add 0 to case from bool to int
         array([0, 0, 1, 1])
         '''
         return x > 0
@@ -128,7 +138,7 @@ class Identity():
         evaluated at x
 
         >>> import numpy
-        >>> Identity.df(numpy.array([-1,0,1]))
+        >>> Identity.df(Identity.f(numpy.array([-1,0,1])))
         array([1, 1, 1])
         '''
         return np.ones_like(x)
@@ -152,19 +162,33 @@ class Softmax():
 
         >>> Softmax.f(np.array([-999, 1, 1]))
         array([ 0. ,  0.5,  0.5])
-        '''
-        maximum = np.maximum(0, x)
-        exp =  np.exp(x)
-        return np.exp(x - maximum - logsumexp(x - maximum, axis=1))
 
+        >>> Softmax.f(np.array([[-999,1,1],[1,-999,1],[1,1,-999],[1,1,1]]))
+	array([[ 0.        ,  0.5       ,  0.5       ],
+	       [ 0.5       ,  0.        ,  0.5       ],
+	       [ 0.5       ,  0.5       ,  0.        ],
+	       [ 0.33333333,  0.33333333,  0.33333333]])
+        '''
+        x = x.astype('float64')
+        shape = x.shape
+        if len(x.shape) == 1:
+            x.shape = (1,x.shape[0])
+        mx =  np.maximum(0.0, x.max(axis=1))
+        mx.shape = (1, mx.shape[0])
+        x -= mx.T
+        x -= logsumexp(x, axis=1, keepdims=True)
+        x.shape = shape
+        return np.exp(x)
+
+    @staticmethod
     def df(x):
         '''df
         Softmax derivative with respect to x
 
         (used maximum entropy so derivative is 1)
 
-        >>> Softmax.df(np.array([-100, 0, 1]))
-        array([1, 1, 1])
+        >>> Softmax.df(Softmax.f(np.array([-100, 0, 1])))
+        array([ 1.,  1.,  1.])
         '''
         return np.ones_like(x)
 
@@ -178,8 +202,7 @@ class LogSoftmax():
     the output.
 
     uses a numerically stable variant to prevent
-    float overflow (not underflow) from
-        http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
+    float overflow (not underflow)
 
     f(x)_i = log( exp(x_i) / sum_j( exp(x) ) )
     '''
@@ -191,19 +214,32 @@ class LogSoftmax():
         with a numpy array x
 
         >>> LogSoftmax.f(np.array([-999, 1, 1]))
-        array([ -9.99693147e+02,  -6.93147181e-01,  -6.93147181e-01])
-        '''
-        maximum = np.maximum(0, x)
-        exp =  np.exp(x)
-        return x - maximum - logsumexp(x - maximum, axis=1)
+        array([ -1.00069315e+03,  -6.93147181e-01,  -6.93147181e-01])
 
+        >>> LogSoftmax.f(np.array([[-999,1,1],[1,-999,1],[1,1,-999]]))
+        array([[ -1.00069315e+03,  -6.93147181e-01,  -6.93147181e-01],
+               [ -6.93147181e-01,  -1.00069315e+03,  -6.93147181e-01],
+               [ -6.93147181e-01,  -6.93147181e-01,  -1.00069315e+03]])
+        '''
+        x = x.astype('float64')
+        shape = x.shape
+        if len(x.shape) == 1:
+            x.shape = (1,x.shape[0])
+        mx =  np.maximum(0.0, x.max(axis=1))
+        mx.shape = (1, mx.shape[0])
+        x -= mx
+        res = x - logsumexp(x, axis=1)
+        res.shape = shape
+        return res
+
+    @staticmethod
     def df(x):
         '''df
         LogSoftmax derivative with respect to x
 
         (used maximum entropy so derivative is 1)
 
-        >>> LogSoftmax.df(np.array([-100, 0, 1]))
-        array([1, 1, 1])
+        >>> LogSoftmax.df(LogSoftmax.f(np.array([-100, 0, 1])))
+        array([ 1.,  1.,  1.])
         '''
         return np.ones_like(x)
