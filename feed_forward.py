@@ -105,7 +105,7 @@ class FeedForwardNet():
 	       [-1.55101849],
 	       [-1.88337959]])]
         >>> print(grad_b)
-	[array([[-0.        , -0.16684527]]), array([[-0.00011079, -0.11078703, -0.02769676]]), array([[-0.11078703]])]
+        [array([[ 0.        , -0.16684527]]), array([[-0.00011079, -0.11078703, -0.02769676]]), array([[-0.11078703]])]
         '''
         # compute deltas (starting with last layer)
         if self.x_entropy: # assume using sigmoid or softmax
@@ -118,11 +118,12 @@ class FeedForwardNet():
             self.deltas[-i] = np.dot(self.deltas[-i+1], self.weights[-i+1].T) * self.transforms[-i].df(self.activations[-i])
 
         # calculate gradients
+        bias_shape = (x.shape[0],1)
         grad_w = [x.T.dot(self.deltas[0])]
-        grad_b = [self.deltas[0].copy()]
+        grad_b = [np.ones(bias_shape).T.dot(self.deltas[0])]
         for i in range(1, len(self.deltas)):
             grad_w.append(self.activations[i-1].T.dot(self.deltas[i]))
-            grad_b.append(self.deltas[i].copy())
+            grad_b.append(np.ones(bias_shape).T.dot(self.deltas[i]))
         return grad_w, grad_b
 
     def cost(self, x, y):
@@ -217,36 +218,64 @@ class FeedForwardNet():
         >>> nn = FeedForwardNet(layers=[3,2,3,1], transforms=[nl.ReLu, nl.ReLu, nl.Sigmoid], cost='mse')
         >>> nn.weights = [np.array([[-3,3],[2,5],[10,2]]), np.array([[-2,3,12],[6,1,2]]), np.array([[0.001],[1],[0.25]])]
         >>> nn.biases = [np.array([0,0]),np.array([-10,3,-5]),np.array([-20])]
+        >>> for l in range(len(nn.weights)):
+        ...     nn.weights[l] = nn.weights[l].astype('float64')
+        ...     nn.biases[l] = nn.biases[l].astype('float64')
         >>> x = np.array([[1,2,-1]])
         >>> y_hat = nn._forward(x) # compute forward pass
-        >>> grad_w, grad_b = nn._numerical_grad(x, 1, 1e-4)
+        >>> grad_w, grad_b = nn._numerical_grad(x, 1, 1e-8)
         >>> print(grad_w)
-	[array([[ 0.        , -0.16684527],
-	       [ 0.        , -0.33369055],
-	       [ 0.        ,  0.16684527]]), array([[ 0.        ,  0.        ,  0.        ],
-	       [-0.00121866, -1.21865738, -0.30466435]]), array([[-6.20407395],
-	       [-1.55101849],
+	[array([[ 0.        , -0.16684528],
+	       [ 0.        , -0.33369056],
+	       [ 0.        ,  0.16684528]]), array([[ 0.        ,  0.        ,  0.        ],
+	       [-0.00121866, -1.21865738, -0.30466435]]), array([[-6.20407394],
+	       [-1.5510185 ],
 	       [-1.88337959]])]
         >>> print(grad_b)
-	[array([[-0.        , -0.16684527]]), array([[-0.00011079, -0.11078703, -0.02769676]]), array([[-0.11078703]])]
+	[array([ 0.        , -0.16684528]), array([ -1.10775278e-04,  -1.10787041e-01,  -2.76967588e-02]), array([-0.11078704])]
+
+	>>> import nonlinearity as nl
+        >>> nn = FeedForwardNet(layers=[2,10,10,3,5], transforms=[nl.ReLu, nl.Tanh, nl.ReLu, nl.Softmax])
+	>>> x = np.array([[100,10], [60,-30], [40, 20], [17, 10]]).astype('float64')
+	>>> y = np.array([[1,0,0,0,0],[0,0,1,0,0],[0,1,0,0,0], [0,0,1,0,0]]).astype('float64')
+	>>> y_hat = nn._forward(x)
+	>>> grad_w, grad_b = nn._backward(x,y)
+	>>> num_g_w, num_g_b = nn._numerical_grad(x, y, 1e-6)
+	>>> for i in range(len(grad_w)):
+	... 	print(np.linalg.norm(grad_w[i] - num_g_w[i]) / np.linalg.norm(grad_w[i] + num_g_w[i]) < 1e-6)
+	... 	print(np.linalg.norm(grad_b[i] - num_g_b[i]) / np.linalg.norm(grad_b[i] + num_g_b[i]) < 1e-6)
+        True
+        True
+        True
+        True
+        True
+        True
+        True
+        True
         '''
         grad_w = [np.zeros_like(w) for w in self.weights]
         grad_b = [np.zeros_like(b) for b in self.biases]
         for l in range(len(self.weights)):
+            purturb = np.zeros_like(self.weights[l])
             for (i,j) in np.ndindex(self.weights[l].shape):
-                self.weights[l][i,j] += epsilon
+                purturb[i,j] = epsilon
+                self.weights[l] += purturb
                 right = self.cost(x,y)
-                self.weights[l][i,j] -= 2*epsilon
+                self.weights[l] -= 2*purturb
                 left = self.cost(x,y)
                 grad_w[l][i,j] = (right - left) / (2*epsilon)
-                self.weights[l][i,j] += epsilon
+                self.weights[l] += purturb
+                purturb[i,j] = 0.0
                 
         for l in range(len(self.biases)):
+            purturb = np.zeros_like(self.biases[l])
             for i in np.ndindex(self.biases[l].shape):
-                self.biases[l][i] += epsilon
+                purturb[i] = epsilon
+                self.biases[l] += purturb
                 right = self.cost(x,y)
-                self.biases[l][i] -= 2*epsilon
+                self.biases[l] -= 2*purturb
                 left = self.cost(x,y)
                 grad_b[l][i] = (right - left) / (2*epsilon)
-                self.biases[l][i] += epsilon
+                self.biases[l] += purturb
+                purturb[i] = 0.0
         return grad_w, grad_b
