@@ -1,3 +1,9 @@
+import nonlinearity as nl
+
+try:
+    import cPickle as pickle
+except:
+    import pickle
 import numpy as np
 from math import sqrt,log
 
@@ -44,6 +50,9 @@ class FeedForwardNet():
         self.layers = layers
 
         self.transforms = transforms
+        self.log_softmax_output = False
+        if transforms[-1] == nl.LogSoftmax:
+            self.log_softmax_output = True
 
         # define activation and deltas
         # of layers to use for forward
@@ -57,6 +66,147 @@ class FeedForwardNet():
             dist = 1 / sqrt(layers[i-1])
             self.weights.append(np.random.rand(layers[i-1], layers[i])*2*dist - dist) # draw from Unif(-dist, dist)
             self.biases.append(np.random.rand(1, layers[i])*2*dist - dist)
+
+        # list to save costs to
+        self.costs = []
+
+    def fit(self, x, y, lr=0.1, max_iter=1000, mini_batch_size=1, \
+            save_accuracy=True, save_costs=False, save_model=False, \
+            model_filename='/feed_forward_nn_{iteration}_iters_{accuracy}_accuracy.pkl', \
+            report_every=10, test_x=None, test_y=None):
+        '''fit
+        fits the neural network to the dataset using
+        minibatch gradient descent.
+
+        x :: np.ndarray (1 or 2 dimensions)
+        y :: np.ndarray (1 or 2 dimensions)
+           - must have the same number of rows as x
+
+        test_x :: np.ndarray (1 or 2 dimensions)
+                - testing dataset which is only used
+                  for accuracy checkin (not cost)
+        test_y :: np.ndarray (1 or 2 dimensions)
+                - must have the same number of rows as x
+
+        lr :: float
+            - learning rate alpha
+        max_iter :: int
+            - maximum number of iterations/epochs to
+              run for
+        save_costs :: bool
+            - whether to record cost values with every
+              update to self.costs
+        save_accuracy :: bool
+            - whether to check the predicted accuracy on the entire
+              training set at each report_every iterations
+        save_model :: bool
+            - whether to persist the model to disk at each
+              report_every itertions
+        model_filename :: string
+            - formattable string of the full filepath to save
+              the model to. Possible keys to use in formatting
+              include:
+                iteration :: int (current iteration)
+                accuracy :: int (floored percent, ie. 69 for 69.235% of accuracy)
+                cost :: int (floored cost metric)
+                lr :: float (learning rate lr)
+        report_every :: int
+            - number of iterations between each printed
+              status update / cost save / model persist /
+              accuracy check
+        '''
+        if len(x.shape) == 1:
+            x.shape = (1,x.shape[0])
+        if save_costs:
+            self.costs = []
+        m = len(x)
+        minibatches = m // mini_batch_size
+        n_weights = len(self.weights)
+        for iteration in range(max_iter):
+            # go through minibatches each epoch
+            for i in range(minibatches):
+                # get minibatch
+                idx = np.random.choice(m, mini_batch_size)
+                batch_x, batch_y = x[idx], y[idx]
+                self._forward(batch_x)
+                grad_w, grad_b = self._backward(batch_x, batch_y)
+
+                # gradient descent step
+                for l in range(n_weights):
+                    self.weights[l] -= lr * grad_w[l]
+                    self.biases[l] -= lr * grad_b[l]
+
+            if iteration % report_every == 0:
+                accuracy = 'Not Saved'
+                cost = 'Not Saved'
+                if save_costs:
+                    self.costs.append(self.cost(x,y))
+                    cost = self.costs[-1]
+                if save_accuracy and test_x:
+                    accuracy = self.evaluate(test_x, test_y)
+                elif save_accuracy:
+                    accuracy = self.evaluate(x, y)
+                if save_model:
+                    self.persist(model_filename.format(iteration=iteration+1, \
+                            accuracy=accuracy, \
+                            cost=cost, \
+                            lr=lr))
+                # print update
+                if save_accuracy:
+                    print('Epoch {}: {}% accuracy'.format(iteration+1, accuracy))
+                elif save_costs:
+                    print('Epoch {}: {} cost'.format(iteration+1, cost))
+                else:
+                    print('Epoch {} completed'.format(iteration+1))
+        print('Training completed')
+
+    def evaluate(self, x, y):
+        '''evaluate
+        evaluates a dataset and tags in a classification
+        setting, returning the accuracy of the network
+
+	>>> import nonlinearity as nl
+	>>> np.random.seed(1)
+        >>> nn = FeedForwardNet(layers=[2,10,10,3,5], transforms=[nl.ReLu, nl.Tanh, nl.ReLu, nl.Softmax])
+	>>> x = np.array([[100,10], [60,-30], [40, 20], [17, 10]]).astype('float64')
+	>>> y = np.array([[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0], [0,1,0,0,0]]).astype('float64')
+        >>> nn._forward(x)
+	array([[ 0.18337369,  0.30337132,  0.14642168,  0.11010731,  0.256726  ],
+	       [ 0.06212841,  0.22033675,  0.31645162,  0.06891918,  0.33216404],
+	       [ 0.1865579 ,  0.30425151,  0.14506023,  0.11126231,  0.25286805],
+	       [ 0.19140122,  0.30549936,  0.14299832,  0.11299255,  0.24710855]])
+	>>> nn.evaluate(x,y)
+	0.75
+        '''
+        if len(x.shape) == 1:
+            x.shape = (1, x.shape[0])
+            y.shape = (1, y.shape[0])
+        y_hat = self._forward(x)
+        pred = (y_hat == np.max(y_hat, axis=1, keepdims=True))
+        return pred[np.arange(len(pred)), y.argmax(axis=1)].sum() / len(x)
+
+    def persist(self, filename):
+        '''persist
+        saves the model to a filepath specified
+        using the Pickle format
+
+	>>> import nonlinearity as nl
+	>>> np.random.seed(1)
+        >>> nn = FeedForwardNet(layers=[2,10,10,3,5], transforms=[nl.ReLu, nl.Tanh, nl.ReLu, nl.Softmax])
+	>>> x = np.array([[100,10], [60,-30], [40, 20], [17, 10]]).astype('float64')
+	>>> y = np.array([[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0], [0,1,0,0,0]]).astype('float64')
+	>>> nn.evaluate(x,y)
+	0.75
+        >>> nn.persist('/tmp/model_test.pkl')
+        >>> nn = None
+        >>> with open('/tmp/model_test.pkl', 'rb') as f:
+        ...     nn = pickle.load(f)
+	>>> nn.evaluate(x,y)
+        0.75
+        '''
+        with open(filename, 'wb') as handle:
+            pickle.dump(self, handle)
+        
 
     def _forward(self, x):
         '''_forward
@@ -108,8 +258,10 @@ class FeedForwardNet():
         [array([[ 0.        , -0.16684527]]), array([[-0.00011079, -0.11078703, -0.02769676]]), array([[-0.11078703]])]
         '''
         # compute deltas (starting with last layer)
-        if self.x_entropy: # assume using sigmoid or softmax
+        if self.x_entropy and not self.log_softmax_output: # assume using sigmoid or softmax
             self.deltas[-1] = (self.activations[-1] - y)
+        elif self.x_entropy: # convert to softmax from log-softmax for learning
+            self.deltas[-1] = (np.exp(self.activations[-1]) - y)
         else:
             self.deltas[-1] = (self.activations[-1] - y) * self.transforms[-1].df(self.activations[-1])
 
@@ -201,6 +353,8 @@ class FeedForwardNet():
                 y_hat[zeros] = 1 - y_hat[zeros]
                 return -1*np.log(y_hat).sum()
             # else multinomial output
+            if self.log_softmax_output: # don't log if already logged
+                return -1*y_hat[np.arange(len(y_hat)), y.argmax(axis=1)].sum()
             return -1*np.log(y_hat[np.arange(len(y_hat)), y.argmax(axis=1)]).sum()
         else: #use mean squared error
             return np.sum(np.square(np.linalg.norm(y - y_hat, axis=1))) / (2*len(x))
@@ -235,15 +389,16 @@ class FeedForwardNet():
 	[array([ 0.        , -0.16684528]), array([ -1.10775278e-04,  -1.10787041e-01,  -2.76967588e-02]), array([-0.11078704])]
 
 	>>> import nonlinearity as nl
+	>>> np.random.seed(42)
         >>> nn = FeedForwardNet(layers=[2,10,10,3,5], transforms=[nl.ReLu, nl.Tanh, nl.ReLu, nl.Softmax])
 	>>> x = np.array([[100,10], [60,-30], [40, 20], [17, 10]]).astype('float64')
 	>>> y = np.array([[1,0,0,0,0],[0,0,1,0,0],[0,1,0,0,0], [0,0,1,0,0]]).astype('float64')
 	>>> y_hat = nn._forward(x)
 	>>> grad_w, grad_b = nn._backward(x,y)
-	>>> num_g_w, num_g_b = nn._numerical_grad(x, y, 1e-6)
+	>>> num_g_w, num_g_b = nn._numerical_grad(x, y, 1e-4)
 	>>> for i in range(len(grad_w)):
-	... 	print(np.linalg.norm(grad_w[i] - num_g_w[i]) / np.linalg.norm(grad_w[i] + num_g_w[i]) < 1e-6)
-	... 	print(np.linalg.norm(grad_b[i] - num_g_b[i]) / np.linalg.norm(grad_b[i] + num_g_b[i]) < 1e-6)
+	... 	print(np.linalg.norm(grad_w[i] - num_g_w[i]) / np.linalg.norm(grad_w[i] + num_g_w[i]) < 1e-4)
+	... 	print(np.linalg.norm(grad_b[i] - num_g_b[i]) / np.linalg.norm(grad_b[i] + num_g_b[i]) < 1e-4)
         True
         True
         True
@@ -252,6 +407,46 @@ class FeedForwardNet():
         True
         True
         True
+
+	>>> import nonlinearity as nl
+	>>> np.random.seed(42)
+        >>> nn = FeedForwardNet(layers=[2,10,10,3,1], transforms=[nl.ReLu, nl.Tanh, nl.ReLu, nl.Sigmoid])
+	>>> x = np.array([[100,10], [60,-30], [40, 20], [17, 10]]).astype('float64')
+	>>> y = np.array([[1],[1],[0], [0]]).astype('float64')
+	>>> y_hat = nn._forward(x)
+	>>> grad_w, grad_b = nn._backward(x,y)
+	>>> num_g_w, num_g_b = nn._numerical_grad(x, y, 1e-4)
+	>>> for i in range(len(grad_w)):
+	... 	print(np.linalg.norm(grad_w[i] - num_g_w[i]) / np.linalg.norm(grad_w[i] + num_g_w[i]) < 1e-4)
+	... 	print(np.linalg.norm(grad_b[i] - num_g_b[i]) / np.linalg.norm(grad_b[i] + num_g_b[i]) < 1e-4)
+	True
+	True
+	True
+	True
+	True
+	True
+	True
+	True
+
+	>>> import nonlinearity as nl
+	>>> np.random.seed(42)
+        >>> nn = FeedForwardNet(layers=[2,5,10,25,10], transforms=[nl.Sigmoid, nl.ReLu, nl.Tanh, nl.LogSoftmax])
+	>>> x = np.array([[100,10], [60,-30], [40, 20], [-170, 10]]).astype('float64')
+	>>> y = np.array([[1,0,0,0,0,0,0,0,0,0],[0,0,1,0,0,0,0,0,0,0],[0,1,0,0,0,0,0,0,0,0], [0,0,1,0,0,0,0,0,0,0]]).astype('float64')
+	>>> y_hat = nn._forward(x)
+	>>> grad_w, grad_b = nn._backward(x,y)
+	>>> num_g_w, num_g_b = nn._numerical_grad(x, y, 1e-4)
+	>>> for i in range(len(grad_w)):
+	... 	print(np.linalg.norm(grad_w[i] - num_g_w[i]) / np.linalg.norm(grad_w[i] + num_g_w[i]) < 1e-4)
+	... 	print(np.linalg.norm(grad_b[i] - num_g_b[i]) / np.linalg.norm(grad_b[i] + num_g_b[i]) < 1e-4)
+	True
+	True
+	True
+	True
+	True
+	True
+	True
+	True
         '''
         grad_w = [np.zeros_like(w) for w in self.weights]
         grad_b = [np.zeros_like(b) for b in self.biases]
