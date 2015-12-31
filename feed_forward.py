@@ -206,7 +206,21 @@ class FeedForwardNet():
         '''
         with open(filename, 'wb') as handle:
             pickle.dump(self, handle)
-        
+
+    def predict(self, x):
+        '''predict
+        takes in a np.ndarray and makes a prediction
+        based on the neural network
+
+	>>> import nonlinearity as nl
+	>>> np.random.seed(1)
+        >>> nn = FeedForwardNet(layers=[2,10,10,3,5], transforms=[nl.ReLu, nl.Tanh, nl.ReLu, nl.Softmax])
+	>>> x = np.array([[100,10], [60,-30], [40, 20], [17, 10]]).astype('float64')
+	>>> y = np.array([[0,1,0,0,0],[0,1,0,0,0],[0,1,0,0,0], [0,1,0,0,0]]).astype('float64')
+        >>> np.all(nn._forward(x) == nn.predict(x))
+        True
+        '''
+        return self._forward(x)
 
     def _forward(self, x):
         '''_forward
