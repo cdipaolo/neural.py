@@ -73,7 +73,7 @@ class FeedForwardNet():
     def fit(self, x, y, lr=0.1, max_iter=1000, mini_batch_size=1, \
             save_accuracy=True, save_costs=False, save_model=False, \
             model_filename='/feed_forward_nn_{iteration}_iters_{accuracy}_accuracy.pkl', \
-            report_every=10, test_x=None, test_y=None):
+            report_every=10, test_x=[], test_y=None):
         '''fit
         fits the neural network to the dataset using
         minibatch gradient descent.
@@ -133,8 +133,8 @@ class FeedForwardNet():
 
                 # gradient descent step
                 for l in range(n_weights):
-                    self.weights[l] -= lr * grad_w[l]
-                    self.biases[l] -= lr * grad_b[l]
+                    self.weights[l] = self.weights[l] - lr * grad_w[l]
+                    self.biases[l] = self.biases[l] - lr * grad_b[l]
 
             if iteration % report_every == 0:
                 accuracy = 'Not Saved'
@@ -142,18 +142,18 @@ class FeedForwardNet():
                 if save_costs:
                     self.costs.append(self.cost(x,y))
                     cost = self.costs[-1]
-                if save_accuracy and test_x:
-                    accuracy = self.evaluate(test_x, test_y)
-                elif save_accuracy:
+                if save_accuracy and len(test_x) == 0:
                     accuracy = self.evaluate(x, y)
+                elif save_accuracy:
+                    accuracy = self.evaluate(test_x, test_y)
                 if save_model:
                     self.persist(model_filename.format(iteration=iteration+1, \
-                            accuracy=accuracy, \
+                            accuracy=int(accuracy*100), \
                             cost=cost, \
                             lr=lr))
                 # print update
                 if save_accuracy:
-                    print('Epoch {}: {}% accuracy'.format(iteration+1, accuracy))
+                    print('Epoch {}: {:05.2f}% accuracy'.format(iteration+1, accuracy*100))
                 elif save_costs:
                     print('Epoch {}: {} cost'.format(iteration+1, cost))
                 else:
